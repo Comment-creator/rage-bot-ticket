@@ -5,9 +5,11 @@ import os
 import requests
 import base64
 from datetime import datetime
+import os
 
-TOKEN = "MTQ3MTQ2NDA4MTU0MTAzODIyMg.G4hayn.IipgHe15W7IXmOphp9fBAxDIHJTwWyPfsbaC58"
-GITHUB_TOKEN = "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"
+TOKEN = os.getenv("TOKEN")
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+
 REPO_NAME = "Comment-creator/rage-transcripts"
 BASE_URL = "https://comment-creator.github.io/rage-transcripts/"
 STAFF_ROLE_NAME = "Support"
@@ -291,3 +293,4 @@ async def setup(ctx):
     await ctx.send(embed=embed, view=TicketView())
 
 bot.run(TOKEN)
+
