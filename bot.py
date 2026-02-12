@@ -51,6 +51,9 @@ def upload_to_github(ticket_name, html_content):
 
     # check if file exists (update instead of create)
     response = requests.get(url, headers=headers)
+    print(response.status_code)
+    print(response.text)
+
     data = {
         "message": f"Update transcript {ticket_name}",
         "content": encoded_content
@@ -314,3 +317,4 @@ async def on_ready():
 
 
 bot.run(TOKEN)
+
