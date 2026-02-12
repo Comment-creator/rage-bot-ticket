@@ -1,15 +1,17 @@
 import discord
 from discord.ext import commands
 import os
-import asyncio
+import requests
+import base64
 from datetime import datetime
+import asyncio
 
 TOKEN = os.getenv("TOKEN")
-
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 
 GITHUB_USERNAME = "Comment-creator"
 REPO_NAME = "rage-transcripts"
+
 SUPPORT_ROLE_NAME = "Support"
 TICKET_CATEGORY_NAME = "Tickets"
 LOG_CHANNEL_NAME = "ticket-logs"
@@ -20,17 +22,41 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 ticket_counter = 1
 
 
-# ================= TRANSCRIPT HTML =================
+# ================= UPLOAD TO GITHUB =================
+
+def upload_to_github(ticket_name, html_content):
+
+    url = f"https://api.github.com/repos/{GITHUB_USERNAME}/{REPO_NAME}/contents/{ticket_name}.html"
+
+    encoded_content = base64.b64encode(html_content.encode()).decode()
+
+    data = {
+        "message": f"Add transcript {ticket_name}",
+        "content": encoded_content
+    }
+
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+
+    response = requests.put(url, json=data, headers=headers)
+
+    return response.status_code in [200, 201]
+
+
+# ================= GENERATE HTML =================
 
 def generate_html(messages, ticket_name):
-    html_content = f"""
+
+    html = f"""
     <html>
     <head>
         <title>{ticket_name}</title>
         <style>
-            body {{ background:#0f0f0f; color:white; font-family:Arial; }}
+            body {{ background:#0f0f0f; color:white; font-family:Arial; padding:20px; }}
             .msg {{ margin-bottom:15px; padding:10px; background:#1c1c1c; border-radius:8px; }}
-            .author {{ font-weight:bold; }}
+            .author {{ font-weight:bold; color:#00b0f4; }}
             .time {{ font-size:12px; color:gray; }}
         </style>
     </head>
@@ -39,7 +65,7 @@ def generate_html(messages, ticket_name):
     """
 
     for msg in messages:
-        html_content += f"""
+        html += f"""
         <div class="msg">
             <div class="author">{msg.author}</div>
             <div>{msg.content}</div>
@@ -47,14 +73,12 @@ def generate_html(messages, ticket_name):
         </div>
         """
 
-    html_content += "</body></html>"
+    html += "</body></html>"
 
-    os.makedirs("transcripts", exist_ok=True)
-    with open(f"transcripts/{ticket_name}.html", "w", encoding="utf-8") as f:
-        f.write(html_content)
+    return html
 
 
-# ================= VIEW BUTTON =================
+# ================= TRANSCRIPT BUTTON =================
 
 class TranscriptButton(discord.ui.View):
     def __init__(self, url):
@@ -62,13 +86,66 @@ class TranscriptButton(discord.ui.View):
         self.add_item(
             discord.ui.Button(
                 label="📄 View Online Transcript",
-                style=discord.ButtonStyle.primary,
+                style=discord.ButtonStyle.link,
                 url=url
             )
         )
 
 
-# ================= CLOSE MODAL =================
+# ================= CLOSE FUNCTION =================
+
+async def close_ticket(interaction, reason):
+
+    await interaction.response.defer()
+
+    support_role = discord.utils.get(interaction.guild.roles, name=SUPPORT_ROLE_NAME)
+
+    if support_role not in interaction.user.roles:
+        return await interaction.followup.send(
+            "❌ Only support can close tickets.",
+            ephemeral=True
+        )
+
+    channel = interaction.channel
+    guild = interaction.guild
+    ticket_name = channel.name
+
+    messages = []
+    async for msg in channel.history(limit=None, oldest_first=True):
+        messages.append(msg)
+
+    html_content = generate_html(messages, ticket_name)
+
+    upload_to_github(ticket_name, html_content)
+
+    transcript_url = f"https://{GITHUB_USERNAME}.github.io/{REPO_NAME}/{ticket_name}.html"
+
+    owner_id = int(channel.topic)
+    owner = guild.get_member(owner_id)
+
+    embed = discord.Embed(title="Ticket Closed", color=discord.Color.red())
+    embed.add_field(name="🎟️ Ticket ID", value=ticket_name, inline=False)
+    embed.add_field(name="🟢 Opened By", value=owner.mention if owner else "Unknown")
+    embed.add_field(name="🔴 Closed By", value=interaction.user.mention)
+    embed.add_field(name="📄 Reason", value=reason, inline=False)
+    embed.add_field(name="⏰ Time", value=datetime.now().strftime("%B %d, %Y %I:%M %p"))
+
+    log_channel = discord.utils.get(guild.text_channels, name=LOG_CHANNEL_NAME)
+
+    if log_channel:
+        await log_channel.send(embed=embed, view=TranscriptButton(transcript_url))
+
+    if owner:
+        try:
+            await owner.send(embed=embed, view=TranscriptButton(transcript_url))
+        except:
+            pass
+
+    await asyncio.sleep(2)
+    await channel.delete()
+
+
+# ================= MODAL =================
 
 class CloseReasonModal(discord.ui.Modal, title="Close Ticket"):
     reason = discord.ui.TextInput(label="Reason", style=discord.TextStyle.paragraph)
@@ -77,7 +154,7 @@ class CloseReasonModal(discord.ui.Modal, title="Close Ticket"):
         await close_ticket(interaction, self.reason.value)
 
 
-# ================= TICKET ACTION VIEW =================
+# ================= TICKET ACTIONS =================
 
 class TicketActions(discord.ui.View):
     def __init__(self):
@@ -109,60 +186,12 @@ class TicketActions(discord.ui.View):
 
         await interaction.channel.send(
             embed=discord.Embed(
-                description=f"✅ **Claimed Ticket**\nYour ticket will be handled by {interaction.user.mention}",
+                description=f"✅ **Claimed Ticket**\nHandled by {interaction.user.mention}",
                 color=discord.Color.green()
             )
         )
 
         await interaction.response.defer()
-
-
-# ================= CLOSE FUNCTION =================
-
-async def close_ticket(interaction, reason):
-
-    support_role = discord.utils.get(interaction.guild.roles, name=SUPPORT_ROLE_NAME)
-
-    if support_role not in interaction.user.roles:
-        return await interaction.response.send_message(
-            "❌ Only support can close tickets.",
-            ephemeral=True
-        )
-
-    channel = interaction.channel
-    ticket_name = channel.name
-    guild = interaction.guild
-
-    messages = []
-    async for msg in channel.history(limit=None, oldest_first=True):
-        messages.append(msg)
-
-    generate_html(messages, ticket_name)
-
-    transcript_url = f"https://{GITHUB_USERNAME}.github.io/{REPO_NAME}/{ticket_name}.html"
-
-    owner_id = int(channel.topic)
-    owner = guild.get_member(owner_id)
-
-    embed = discord.Embed(title="Ticket Closed", color=discord.Color.red())
-    embed.add_field(name="🎟️ Ticket ID", value=ticket_name, inline=False)
-    embed.add_field(name="🟢 Opened By", value=owner.mention if owner else "Unknown")
-    embed.add_field(name="🔴 Closed By", value=interaction.user.mention)
-    embed.add_field(name="📄 Reason", value=reason, inline=False)
-    embed.add_field(name="⏰ Time", value=datetime.now().strftime("%B %d, %Y %I:%M %p"))
-
-    log_channel = discord.utils.get(guild.text_channels, name=LOG_CHANNEL_NAME)
-
-    if log_channel:
-        await log_channel.send(embed=embed, view=TranscriptButton(transcript_url))
-
-    if owner:
-        try:
-            await owner.send(embed=embed, view=TranscriptButton(transcript_url))
-        except:
-            pass
-
-    await channel.delete()
 
 
 # ================= TICKET SELECT =================
@@ -217,7 +246,7 @@ class TicketSelect(discord.ui.Select):
         await channel.send(
             f"{interaction.user.mention} {support_role.mention}",
             embed=discord.Embed(
-                description="Thank you for contacting support.\nPlease describe your issue and wait for response.",
+                description="Thank you for contacting support.\nPlease describe your issue.",
                 color=discord.Color.green()
             ),
             view=TicketActions()
@@ -231,8 +260,6 @@ class TicketView(discord.ui.View):
         super().__init__(timeout=None)
         self.add_item(TicketSelect())
 
-
-# ================= READY =================
 @bot.command()
 async def setup(ctx):
 
@@ -248,8 +275,7 @@ async def setup(ctx):
     embed.set_footer(text="Powered by Rage Ticket")
 
     await ctx.send(embed=embed, view=TicketView())
-
-
+    
 @bot.event
 async def on_ready():
     bot.add_view(TicketView())
