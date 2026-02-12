@@ -213,6 +213,9 @@ class TicketSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         global ticket_counter
 
+        selected_category_name = self.values[0]
+
+        # منع فتح تيكتين لنفس الشخص
         for channel in interaction.guild.text_channels:
             if channel.topic == str(interaction.user.id):
                 return await interaction.response.send_message(
@@ -220,12 +223,21 @@ class TicketSelect(discord.ui.Select):
                     ephemeral=True
                 )
 
-        category = discord.utils.get(interaction.guild.categories, name=TICKET_CATEGORY_NAME)
+        # لو الكاتيجوري مش موجودة نعملها
+        category = discord.utils.get(
+            interaction.guild.categories,
+            name=selected_category_name
+        )
 
         if not category:
-            category = await interaction.guild.create_category(TICKET_CATEGORY_NAME)
+            category = await interaction.guild.create_category(
+                selected_category_name
+            )
 
-        support_role = discord.utils.get(interaction.guild.roles, name=SUPPORT_ROLE_NAME)
+        support_role = discord.utils.get(
+            interaction.guild.roles,
+            name=SUPPORT_ROLE_NAME
+        )
 
         ticket_name = f"ticket-{ticket_counter:02d}"
         ticket_counter += 1
@@ -252,7 +264,8 @@ class TicketSelect(discord.ui.Select):
             view=TicketActions()
         )
 
-        await interaction.response.send_message("✅ Ticket created!", ephemeral=True)
+        # 👇 دي أهم نقطة — نرجع الـ View علشان يعمل Reset
+        await interaction.response.edit_message(view=TicketView())
 
 
 class TicketView(discord.ui.View):
@@ -284,3 +297,4 @@ async def on_ready():
 
 
 bot.run(TOKEN)
+
