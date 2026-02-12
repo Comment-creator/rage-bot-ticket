@@ -12,6 +12,7 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 
 GITHUB_USERNAME = "Comment-creator"
 REPO_NAME = "rage-transcripts"
+BRANCH = "main"
 
 SUPPORT_ROLE_NAME = "Support"
 LOG_CHANNEL_NAME = "ticket-logs"
@@ -39,30 +40,37 @@ def save_counter(count):
 # ================= GITHUB UPLOAD =================
 
 def upload_to_github(ticket_name, html_content):
-
     url = f"https://api.github.com/repos/{GITHUB_USERNAME}/{REPO_NAME}/contents/{ticket_name}.html"
 
-    encoded_content = base64.b64encode(html_content.encode()).decode()
+    encoded_content = base64.b64encode(html_content.encode("utf-8")).decode("utf-8")
 
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
         "Accept": "application/vnd.github.v3+json"
     }
 
-    # check if file exists (update instead of create)
-    response = requests.get(url, headers=headers)
-    print(response.status_code)
-    print(response.text)
+    # check if file exists
+    response = requests.get(url, headers=headers, params={"ref": BRANCH})
 
     data = {
-        "message": f"Update transcript {ticket_name}",
-        "content": encoded_content
+        "message": f"Upload transcript {ticket_name}",
+        "content": encoded_content,
+        "branch": BRANCH
     }
 
+    # if file exists -> update
     if response.status_code == 200:
         data["sha"] = response.json()["sha"]
 
-    requests.put(url, json=data, headers=headers)
+    r = requests.put(url, json=data, headers=headers)
+
+    print("UPLOAD STATUS:", r.status_code)
+    print(r.text)
+
+    if r.status_code not in [200, 201]:
+        print("❌ GitHub Upload Failed")
+    else:
+        print("✅ Transcript Uploaded Successfully")
 
 
 # ================= HTML GENERATION =================
@@ -317,4 +325,3 @@ async def on_ready():
 
 
 bot.run(TOKEN)
-
