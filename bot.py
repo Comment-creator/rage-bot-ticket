@@ -21,15 +21,36 @@ intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 COUNTER_FILE = "ticket_counter.json"
+CATEGORY_MAP = {
+    "Technical Support": "support",
+    "Game Issue": "game",
+    "Ban / Anti-Cheat / Chat Block": "ban"
+}
 
 
 # ================= COUNTER =================
 
-def load_counter():
+def load_counters():
     if not os.path.exists(COUNTER_FILE):
-        return 1
+        return {}
     with open(COUNTER_FILE, "r") as f:
-        return json.load(f)["count"]
+        return json.load(f)
+
+def save_counters(counters):
+    with open(COUNTER_FILE, "w") as f:
+        json.dump(counters, f, indent=4)
+
+def get_next_ticket_number(category_name):
+    counters = load_counters()
+
+    if category_name not in counters:
+        counters[category_name] = 1
+    else:
+        counters[category_name] += 1
+
+    save_counters(counters)
+
+    return counters[category_name]
 
 
 def save_counter(count):
@@ -248,16 +269,25 @@ class TicketSelect(discord.ui.Select):
                     ephemeral=True
                 )
 
-        category = discord.utils.get(interaction.guild.categories, name=selected_category_name)
+        category = discord.utils.get(
+            interaction.guild.categories,
+            name=selected_category_name
+        )
 
         if not category:
             category = await interaction.guild.create_category(selected_category_name)
 
-        support_role = discord.utils.get(interaction.guild.roles, name=SUPPORT_ROLE_NAME)
+        support_role = discord.utils.get(
+            interaction.guild.roles,
+            name=SUPPORT_ROLE_NAME
+        )
 
-        ticket_counter = load_counter()
-        ticket_name = f"ticket-{ticket_counter:02d}"
-        save_counter(ticket_counter + 1)
+        # 👇 عداد مستقل لكل Category
+        ticket_number = get_next_ticket_number(selected_category_name)
+
+        category_slug = CATEGORY_MAP[selected_category_name]
+
+        ticket_name = f"{category_slug}-{ticket_number:02d}"
 
         overwrites = {
             interaction.guild.default_role: discord.PermissionOverwrite(read_messages=False),
@@ -292,6 +322,7 @@ class TicketSelect(discord.ui.Select):
 
         # Reset select
         await interaction.response.edit_message(view=TicketView())
+
 
 
 class TicketView(discord.ui.View):
