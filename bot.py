@@ -261,12 +261,21 @@ class TicketSelect(discord.ui.Select):
             topic=str(interaction.user.id)
         )
 
+        embed = discord.Embed(
+            description=(
+                "Thank you for contacting support.\n"
+                "شكراً لتواصلك مع فريق الدعم.\n\n"
+                "Please describe your issue and wait for a response.\n"
+                "من فضلك اكتب مشكلتك بالتفصيل وانتظر الرد من فريق الدعم."
+            ),
+            color=discord.Color.green()
+        )
+
+        embed.set_footer(text="Powered by Rage Ticket")
+
         await channel.send(
             f"{interaction.user.mention} {support_role.mention}",
-            embed=discord.Embed(
-                description="Thank you for contacting support.\nPlease describe your issue.",
-                color=discord.Color.green()
-            ),
+            embed=embed,
             view=TicketActions()
         )
 
@@ -278,12 +287,13 @@ class TicketView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(TicketSelect())
+
 @bot.command()
 async def setup(ctx):
 
     embed = discord.Embed(
         title="📩 OPEN A TICKET",
-        description="Click the button below to open a support ticket.",
+        description="Click the button below to Chose Your ticket.",
         color=0x00b0f4
     )
 
@@ -293,6 +303,7 @@ async def setup(ctx):
     embed.set_footer(text="Powered by Rage Ticket")
 
     await ctx.send(embed=embed, view=TicketView())
+
 
 @bot.event
 async def on_ready():
