@@ -5,6 +5,7 @@ import requests
 import base64
 from datetime import datetime
 import asyncio
+import json
 
 TOKEN = os.getenv("TOKEN")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
@@ -13,16 +14,29 @@ GITHUB_USERNAME = "Comment-creator"
 REPO_NAME = "rage-transcripts"
 
 SUPPORT_ROLE_NAME = "Support"
-TICKET_CATEGORY_NAME = "Tickets"
 LOG_CHANNEL_NAME = "ticket-logs"
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-ticket_counter = 1
+COUNTER_FILE = "ticket_counter.json"
 
 
-# ================= UPLOAD TO GITHUB =================
+# ================= COUNTER =================
+
+def load_counter():
+    if not os.path.exists(COUNTER_FILE):
+        return 1
+    with open(COUNTER_FILE, "r") as f:
+        return json.load(f)["count"]
+
+
+def save_counter(count):
+    with open(COUNTER_FILE, "w") as f:
+        json.dump({"count": count}, f)
+
+
+# ================= GITHUB UPLOAD =================
 
 def upload_to_github(ticket_name, html_content):
 
@@ -30,22 +44,25 @@ def upload_to_github(ticket_name, html_content):
 
     encoded_content = base64.b64encode(html_content.encode()).decode()
 
-    data = {
-        "message": f"Add transcript {ticket_name}",
-        "content": encoded_content
-    }
-
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
         "Accept": "application/vnd.github.v3+json"
     }
 
-    response = requests.put(url, json=data, headers=headers)
+    # check if file exists (update instead of create)
+    response = requests.get(url, headers=headers)
+    data = {
+        "message": f"Update transcript {ticket_name}",
+        "content": encoded_content
+    }
 
-    return response.status_code in [200, 201]
+    if response.status_code == 200:
+        data["sha"] = response.json()["sha"]
+
+    requests.put(url, json=data, headers=headers)
 
 
-# ================= GENERATE HTML =================
+# ================= HTML GENERATION =================
 
 def generate_html(messages, ticket_name):
 
@@ -74,7 +91,6 @@ def generate_html(messages, ticket_name):
         """
 
     html += "</body></html>"
-
     return html
 
 
@@ -115,7 +131,6 @@ async def close_ticket(interaction, reason):
         messages.append(msg)
 
     html_content = generate_html(messages, ticket_name)
-
     upload_to_github(ticket_name, html_content)
 
     transcript_url = f"https://{GITHUB_USERNAME}.github.io/{REPO_NAME}/{ticket_name}.html"
@@ -124,7 +139,7 @@ async def close_ticket(interaction, reason):
     owner = guild.get_member(owner_id)
 
     embed = discord.Embed(title="Ticket Closed", color=discord.Color.red())
-    embed.add_field(name="🎟️ Ticket ID", value=ticket_name, inline=False)
+    embed.add_field(name="🎟 Ticket ID", value=ticket_name, inline=False)
     embed.add_field(name="🟢 Opened By", value=owner.mention if owner else "Unknown")
     embed.add_field(name="🔴 Closed By", value=interaction.user.mention)
     embed.add_field(name="📄 Reason", value=reason, inline=False)
@@ -154,7 +169,7 @@ class CloseReasonModal(discord.ui.Modal, title="Close Ticket"):
         await close_ticket(interaction, self.reason.value)
 
 
-# ================= TICKET ACTIONS =================
+# ================= ACTION BUTTONS =================
 
 class TicketActions(discord.ui.View):
     def __init__(self):
@@ -194,7 +209,7 @@ class TicketActions(discord.ui.View):
         await interaction.response.defer()
 
 
-# ================= TICKET SELECT =================
+# ================= SELECT MENU =================
 
 class TicketSelect(discord.ui.Select):
     def __init__(self):
@@ -211,11 +226,10 @@ class TicketSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
-        global ticket_counter
 
         selected_category_name = self.values[0]
 
-        # منع فتح تيكتين لنفس الشخص
+        # منع تكرار التيكت
         for channel in interaction.guild.text_channels:
             if channel.topic == str(interaction.user.id):
                 return await interaction.response.send_message(
@@ -223,24 +237,16 @@ class TicketSelect(discord.ui.Select):
                     ephemeral=True
                 )
 
-        # لو الكاتيجوري مش موجودة نعملها
-        category = discord.utils.get(
-            interaction.guild.categories,
-            name=selected_category_name
-        )
+        category = discord.utils.get(interaction.guild.categories, name=selected_category_name)
 
         if not category:
-            category = await interaction.guild.create_category(
-                selected_category_name
-            )
+            category = await interaction.guild.create_category(selected_category_name)
 
-        support_role = discord.utils.get(
-            interaction.guild.roles,
-            name=SUPPORT_ROLE_NAME
-        )
+        support_role = discord.utils.get(interaction.guild.roles, name=SUPPORT_ROLE_NAME)
 
+        ticket_counter = load_counter()
         ticket_name = f"ticket-{ticket_counter:02d}"
-        ticket_counter += 1
+        save_counter(ticket_counter + 1)
 
         overwrites = {
             interaction.guild.default_role: discord.PermissionOverwrite(read_messages=False),
@@ -264,7 +270,7 @@ class TicketSelect(discord.ui.Select):
             view=TicketActions()
         )
 
-        # 👇 دي أهم نقطة — نرجع الـ View علشان يعمل Reset
+        # Reset select
         await interaction.response.edit_message(view=TicketView())
 
 
@@ -272,7 +278,6 @@ class TicketView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(TicketSelect())
-
 @bot.command()
 async def setup(ctx):
 
@@ -288,13 +293,13 @@ async def setup(ctx):
     embed.set_footer(text="Powered by Rage Ticket")
 
     await ctx.send(embed=embed, view=TicketView())
-    
+
 @bot.event
 async def on_ready():
     bot.add_view(TicketView())
     bot.add_view(TicketActions())
+    print("🔥 PRODUCTION FINAL LOADED")
     print(f"Logged in as {bot.user}")
 
 
 bot.run(TOKEN)
-
